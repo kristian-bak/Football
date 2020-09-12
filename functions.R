@@ -317,3 +317,73 @@ f_plot <- function(data, bet_amount = 10, num_season = 1920) {
   return(out)
   
 }
+
+## Season functions:
+
+f_factor_season <- function(data) {
+  
+  data$factorH <- data$B365H * data$pH
+  data$factorD <- data$B365D * data$pD
+  data$factorA <- data$B365A * data$pA
+  
+  return(data)
+  
+}
+
+f_bet_season <- function(data) {
+  
+  n <- nrow(data)
+  
+  for (i in 1:n) {
+    bet <- names(which.max(data[i, c("factorH", "factorA", "factorD")]))
+    str_bet <- gsub("factor", "", bet)
+    if (data[i, bet] > 1) {
+      data$bet[i] <- str_bet
+      if (str_bet == "H") {
+        data$odds[i] <- data$B365H[i]
+      } else if (str_bet == "A") {
+        data$odds[i] <- data$B365A[i]
+      } else {
+        data$odds[i] <- data$B365D[i]
+      }
+    } else {
+      data$bet[i] <- "No bet"
+    }
+    
+  }
+  
+  return(data)
+  
+}
+
+f_predict_season <- function(flags, model, new_season, bet_amount = 10) {
+  
+  flags$lambda <- predict(model, type = "response")
+  
+  homeID <- seq(from = 1, to = nrow(flags) - 1, by = 2)
+  awayID <- seq(from = 2, to = nrow(flags), by = 2)
+  df_lambda <- data.frame(HomeTeam = flags$team[homeID], 
+                          AwayTeam = flags$team[awayID], 
+                          LambdaH = flags$lambda[homeID], 
+                          LambdaA = flags$lambda[awayID])
+  
+  df_lambda$Game <- paste0(df_lambda$HomeTeam, "-", df_lambda$AwayTeam)
+  
+  joined_games <- intersect(df_lambda$Game, new_season$Game)
+  
+  df_lambda_join <- df_lambda[df_lambda$Game %in% joined_games, ]
+  data1920_join <- data1920[data1920$Game %in% joined_games, ]
+  
+  predict_data <- merge(x = data1920_join, y = df_lambda_join, by = "Game")
+  predict_data <- predict_data[, c("Date", "HomeTeam.x", "AwayTeam.x", "FTHG", "FTAG", "FTR", 
+                                   "B365H", "B365D", "B365A", "LambdaH", "LambdaA")]
+  colnames(predict_data) <- c("Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG", "FTR", 
+                              "B365H", "B365D", "B365A", "LambdaH", "LambdaA")
+  
+  predict_data <- f_prob(data = predict_data)
+  predict_data <- f_factor(data = predict_data)
+  predict_data <- f_bet(data = predict_data)
+  predict_data <- f_outcome(data = predict_data, bet_amount = bet_amount)
+  
+  return(predict_data)
+}
