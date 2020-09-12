@@ -8,11 +8,11 @@ data1819 <- f_load(season = 1819)
 
 data1920 <- f_load(season = 1920)
 
-flags <- f_flags(data = data1819)
+model <- f_fit(data1920)
 
-m <- f_fit(flags)
-
-predict_data <- f_predict(flags = flags, model = m, new_season = data1920)
+## lav en ny predict funktion, der returner, hvad man skal gøre i den nye runde baseret på 
+## danske spil odds. 
+predict_data <- f_predict_round(fit_data = data1920, model = model)
 
 head(predict_data)
 
@@ -33,13 +33,22 @@ dt[, odds_group := cut(odds, quantile(dt$odds, probs = seq(from = 0, to = 1, by 
 dt[, odds_label := cut(odds, quantile(dt$odds, probs = seq(from = 0, to = 1, by = 0.1)), 
                        include.lowest = TRUE)]
 
-profit <- dt[, list("Counts" = .N, "Sum" = sum(outcome)), by = c("odds_group", "odds_label")]
+dt_profit <- dt[, list("Counts" = .N, "Sum" = sum(outcome)), by = c("odds_group", "odds_label")]
 
-setorderv(profit, "odds_group")
+setorderv(dt_profit, "odds_group")
 
-profit    
+dt_profit    
 
-plot_ly(data = profit, x = ~odds_label, y = ~Sum, type = "scatter", mode = "lines+markers") %>%
+plot_ly(data = dt_profit, x = ~odds_label, y = ~Sum, type = "scatter", mode = "lines+markers") %>%
   layout(title = "PL1920 test data profit by odds group", xaxis = list("title" = "Odds group"))
 
 dt[odds > 8]
+
+dt[, acc := ifelse(outcome > 0, 1, 0)]
+
+dt_precision <- dt[, list("Counts" = .N, "Accurate" = sum(acc), "Accuracy" = sum(acc) / .N), 
+                   by = c("odds_group", "odds_label")]
+
+setorderv(dt_precision, "odds_group")
+
+dt_precision

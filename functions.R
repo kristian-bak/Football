@@ -13,7 +13,7 @@ f_load <- function(league = "PL", season) {
     stop("league must be PL at the moment")
   }
   
-  if (season %notin% c(1819, 1920)) {
+  if (season %notin% c(1617, 1718, 1819, 1920)) {
     stop("season must be 1819 or 1920")
   }
   
@@ -88,7 +88,9 @@ f_flags <- function(data) {
   
 }
 
-f_fit <- function(flags, y = "goals") {
+f_fit <- function(data, y = "goals") {
+  
+  flags <- f_flags(data = data)
   
   n_teams <- length(unique(flags$team))
   str_attack <- paste0("attack_", 1:n_teams)
@@ -139,9 +141,9 @@ f_prob <- function(data, n_goals = 12) {
 
 f_factor <- function(data) {
   
-  data$factorH <- data$B365H * data$pH
-  data$factorD <- data$B365D * data$pD
-  data$factorA <- data$B365A * data$pA
+  data$factorH <- data$home_odds * data$pH
+  data$factorD <- data$draw_odds * data$pD
+  data$factorA <- data$away_odds * data$pA
   
   return(data)
   
@@ -157,11 +159,11 @@ f_bet <- function(data) {
     if (data[i, bet] > 1) {
       data$bet[i] <- str_bet
       if (str_bet == "H") {
-        data$odds[i] <- data$B365H[i]
+        data$odds[i] <- data$home_odds[i]
       } else if (str_bet == "A") {
-        data$odds[i] <- data$B365A[i]
+        data$odds[i] <- data$away_odds[i]
       } else {
-        data$odds[i] <- data$B365D[i]
+        data$odds[i] <- data$draw_odds[i]
       }
     } else {
       data$bet[i] <- "No bet"
@@ -178,8 +180,91 @@ f_outcome <- function(data, bet_amount = 10) {
   return(data)
 }
 
-f_predict <- function(flags, model, new_season, bet_amount = 10) {
+
+f_rename <- function(team) {
+  ifelse(team == "Crystal P", 
+         "Crystal Palace", 
+         ifelse(team == "Manchester C", 
+                "Man City", 
+                ifelse(team == "Manchester U", 
+                       "Man United", 
+                       ifelse(team == "Wolverhampton", 
+                              "Wolves", team))))
+}
+
+f_load_odds <- function() {
   
+  url <- "https://dswebapp.sb.danskespil.dk/allekampe/den-lange?ev_categories_ids=21&ev_class_id=97&ev_type_id=13304&date_filter=FUT"
+  
+  webpage <- read_html(url)
+  
+  game <- webpage %>%
+    html_nodes('div[class="eventCont"] span') %>% html_text()
+  
+  game <- game[game != "Premier League - England"]
+  
+  special_id <- grep("Over/Under", game)
+  
+  game <- game[-special_id]
+  n_games <- length(game)
+  
+  home_team <- gsub(" v .*", "", game)
+  away_team <- gsub(".* v ", "", game)
+  
+  odds <- webpage %>%
+    html_nodes('td span[class="odds-decimal"]') %>% html_text() %>% str_replace_all('\\n', '')
+  
+  f_remove_special <- function(odds, special_id) {
+    id <- 3 * special_id - 2
+    odds <- odds[-c(id, id + 1)]
+    return(odds)
+  }
+  
+  odds <- f_remove_special(odds, special_id)
+  odds <- gsub(",", ".", odds)
+  odds <- as.numeric(odds)
+  
+  f_linReg <- function(x, a, b) {
+    a * x + b
+  }
+  
+  f_odds <- function(id, type) {
+    
+    if (type == 1) {
+      # a and b found as coefficents satisfying linReg with x = c(1, 2, 3) and y = c(1, 4, 7)
+      odds[f_linReg(x = id, a = 3, b = -2)]
+    } else if (type == 2) {
+      # a and b found as coefficents satisfying linReg with x = c(1, 2, 3) and y = c(2, 5, 8)
+      odds[f_linReg(x = id, a = 3, b = -1)]
+    } else if (type == 3) {
+      # a and b found as coefficents satisfying linReg with x = c(1, 2, 3) and y = c(3, 6, 9)
+      odds[f_linReg(x = id, a = 3, b = 0)]
+    }
+    
+  }
+  
+  game_id <- 1:n_games
+  
+  HomeTeam <- f_rename(team = home_team)
+  AwayTeam <- f_rename(team = away_team)
+  Game <- paste0(HomeTeam, "-", AwayTeam)
+  
+  df <- data.frame(Game,
+                   HomeTeam, 
+                   AwayTeam,
+                   home_odds = f_odds(game_id, type = 1), 
+                   draw_odds = f_odds(game_id, type = 2), 
+                   away_odds = f_odds(game_id, type = 3),
+                   stringsAsFactors = FALSE)
+  
+  return(df)
+  
+}
+
+f_predict_round <- function(fit_data, model, bet_amount = 10) {
+  
+  flags <- f_flags(data = fit_data)
+
   flags$lambda <- predict(model, type = "response")
   
   homeID <- seq(from = 1, to = nrow(flags) - 1, by = 2)
@@ -187,25 +272,27 @@ f_predict <- function(flags, model, new_season, bet_amount = 10) {
   df_lambda <- data.frame(HomeTeam = flags$team[homeID], 
                           AwayTeam = flags$team[awayID], 
                           LambdaH = flags$lambda[homeID], 
-                          LambdaA = flags$lambda[awayID])
+                          LambdaA = flags$lambda[awayID], 
+                          stringsAsFactors = FALSE)
   
   df_lambda$Game <- paste0(df_lambda$HomeTeam, "-", df_lambda$AwayTeam)
   
-  joined_games <- intersect(df_lambda$Game, new_season$Game)
+  new_data <- f_load_odds()
+  
+  joined_games <- intersect(df_lambda$Game, new_data$Game)
   
   df_lambda_join <- df_lambda[df_lambda$Game %in% joined_games, ]
-  data1920_join <- data1920[data1920$Game %in% joined_games, ]
+  new_data_join <- new_data[new_data$Game %in% joined_games, ]
   
-  predict_data <- merge(x = data1920_join, y = df_lambda_join, by = "Game")
-  predict_data <- predict_data[, c("Date", "HomeTeam.x", "AwayTeam.x", "FTHG", "FTAG", "FTR", 
-                                   "B365H", "B365D", "B365A", "LambdaH", "LambdaA")]
-  colnames(predict_data) <- c("Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG", "FTR", 
-                              "B365H", "B365D", "B365A", "LambdaH", "LambdaA")
-  
+  predict_data <- merge(x = new_data_join, y = df_lambda_join, by = "Game")
+  predict_data <- predict_data[, c("HomeTeam.x", "AwayTeam.x",
+                                   "home_odds", "draw_odds", "away_odds", "LambdaH", "LambdaA")]
+  colnames(predict_data) <- c("HomeTeam", "AwayTeam", 
+                              "home_odds", "draw_odds", "away_odds", "LambdaH", "LambdaA")
+
   predict_data <- f_prob(data = predict_data)
   predict_data <- f_factor(data = predict_data)
   predict_data <- f_bet(data = predict_data)
-  predict_data <- f_outcome(data = predict_data, bet_amount = bet_amount)
   
   return(predict_data)
 }
