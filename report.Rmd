@@ -1,0 +1,24 @@
+---
+title: "report"
+author: "Kristian"
+date: "12/9/2020"
+output: html_document
+---
+
+```{r, echo = FALSE, message = FALSE}
+options(width = 300)
+library(rvest)
+
+source("C:/Users/Kristian/Programmering/R/Football/functions.R")
+
+#data1819 <- f_load(season = 1819)
+
+data1920 <- f_load(season = 1920)
+
+model <- f_fit(data1920)
+
+predict_data <- f_predict_round(fit_data = data1920, model = model)
+
+predict_data
+```
+

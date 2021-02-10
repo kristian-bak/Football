@@ -14,7 +14,9 @@ model <- f_fit(data1920)
 ## danske spil odds. 
 predict_data <- f_predict_round(fit_data = data1920, model = model)
 
-head(predict_data)
+predict_data
+
+predict_data[!is.na(predict_data$odds), ]
 
 plot_res <- f_plot(data = predict_data, bet_amount = 10, num_season = 1920)
 

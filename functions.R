@@ -88,18 +88,24 @@ f_flags <- function(data) {
   
 }
 
-f_fit <- function(data, y = "goals") {
+f_fit <- function(data, y = "goals", weight = NULL) {
   
   flags <- f_flags(data = data)
   
   n_teams <- length(unique(flags$team))
   str_attack <- paste0("attack_", 1:n_teams)
   str_defence <- paste0("defence_", 1:n_teams)
-  
+  browser()
   form <- as.formula(paste0(y, " ~ -1 + home_effect + ", 
                             paste0(c(str_attack, str_defence), collapse = " + ")))
   
-  m <- glm(formula = form, family = poisson(link = "log"), data = flags)
+  if (is.null(weight)) {
+    flags$weight <- rep(1, nrow(flags))
+  } else {
+    flags$weight <- exp(- rep(1:(nrow(flags) / 2), each = 2) / (nrow(flags) / 2))
+  }
+  
+  m <- glm(formula = form, family = poisson(link = "log"), data = flags, weights = flags$weight)
   
   return(m)
   
@@ -139,11 +145,11 @@ f_prob <- function(data, n_goals = 12) {
   
 }
 
-f_factor <- function(data) {
+f_factor <- function(data, digits = 2) {
   
-  data$factorH <- data$home_odds * data$pH
-  data$factorD <- data$draw_odds * data$pD
-  data$factorA <- data$away_odds * data$pA
+  data$factorH <- round(data$home_odds * data$pH, digits)
+  data$factorD <- round(data$draw_odds * data$pD, digits)
+  data$factorA <- round(data$away_odds * data$pA, digits)
   
   return(data)
   
@@ -152,6 +158,7 @@ f_factor <- function(data) {
 f_bet <- function(data) {
   
   n <- nrow(data)
+  data$odds <- rep(NA, n)
   
   for (i in 1:n) {
     bet <- names(which.max(data[i, c("factorH", "factorA", "factorD")]))
@@ -212,7 +219,7 @@ f_load_odds <- function() {
   away_team <- gsub(".* v ", "", game)
   
   odds <- webpage %>%
-    html_nodes('td span[class="odds-decimal"]') %>% html_text() %>% str_replace_all('\\n', '')
+    html_nodes('td span[class="odds-decimal"]') %>% html_text() %>% stringr::str_replace_all('\\n', '')
   
   f_remove_special <- function(odds, special_id) {
     id <- 3 * special_id - 2
@@ -284,7 +291,8 @@ f_predict_round <- function(fit_data, model, bet_amount = 10) {
   df_lambda_join <- df_lambda[df_lambda$Game %in% joined_games, ]
   new_data_join <- new_data[new_data$Game %in% joined_games, ]
   
-  predict_data <- merge(x = new_data_join, y = df_lambda_join, by = "Game")
+  predict_data <- merge(x = new_data_join, y = df_lambda_join, by = "Game", sort = FALSE)
+  
   predict_data <- predict_data[, c("HomeTeam.x", "AwayTeam.x",
                                    "home_odds", "draw_odds", "away_odds", "LambdaH", "LambdaA")]
   colnames(predict_data) <- c("HomeTeam", "AwayTeam", 
@@ -293,6 +301,13 @@ f_predict_round <- function(fit_data, model, bet_amount = 10) {
   predict_data <- f_prob(data = predict_data)
   predict_data <- f_factor(data = predict_data)
   predict_data <- f_bet(data = predict_data)
+  
+  predict_data <- predict_data[, c("HomeTeam", "AwayTeam", "home_odds", "draw_odds", "away_odds", 
+                                   "factorH", "factorD", "factorA", "bet")]
+  
+  colnames(predict_data) <- c("HomeTeam", "AwayTeam", 
+                              "oddsH", "oddsD", "oddsA",
+                              "factorH", "factorD", "factorA", "bet")
   
   return(predict_data)
 }
@@ -320,11 +335,11 @@ f_plot <- function(data, bet_amount = 10, num_season = 1920) {
 
 ## Season functions:
 
-f_factor_season <- function(data) {
+f_factor_season <- function(data, digits = 2) {
   
-  data$factorH <- data$B365H * data$pH
-  data$factorD <- data$B365D * data$pD
-  data$factorA <- data$B365A * data$pA
+  data$factorH <- round(data$B365H * data$pH, digits)
+  data$factorD <- round(data$B365D * data$pD, digits)
+  data$factorA <- round(data$B365A * data$pA, digits)
   
   return(data)
   
@@ -348,6 +363,7 @@ f_bet_season <- function(data) {
       }
     } else {
       data$bet[i] <- "No bet"
+      data$odds[i] <- NA
     }
     
   }
